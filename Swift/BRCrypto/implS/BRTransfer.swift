@@ -129,15 +129,38 @@ class TransferImplS: Transfer {
                                             event: TransferEvent.created)
     }
 
+    internal init (listener: TransferListener?,
+                   wallet: WalletImplS,
+                   unit: Unit,
+                   gen: (source:Address, target:Address, amount:Amount, fee:Amount)) {
+        self.listener = listener
+        self.wallet = wallet
+        self.unit = unit
+        self.state = TransferState.created
+        self.impl = Impl.generic(source: gen.source, target: gen.target, amount: gen.amount, fee: gen.fee)
+
+        let gasUnit = wallet.manager.network.baseUnitFor(currency: wallet.manager.currency)!
+
+        let gasPrice = Amount.createAsETH(createUInt256 (0), gasUnit)
+        self.feeBasis = TransferFeeBasis.ethereum(gasPrice: gasPrice, gasLimit: 0)
+
+        self.listener?.handleTransferEvent (system: system,
+                                            manager: manager,
+                                            wallet: wallet,
+                                            transfer: self,
+                                            event: TransferEvent.created)
+    }
 
     enum Impl {
         case bitcoin (wid: BRCoreWallet, tid: BRCoreTransaction)
         case ethereum (ewm: BREthereumEWM, core: BREthereumTransfer)
+        case generic (source:Address, target:Address, amount: Amount, fee: Amount)
 
         internal var eth: BREthereumTransfer! {
             switch self {
             case .bitcoin: return nil
             case .ethereum (_, let core): return core
+            case .generic: return nil
             }
         }
 
@@ -145,6 +168,7 @@ class TransferImplS: Transfer {
             switch self {
             case .bitcoin (_, let tid): return tid
             case .ethereum: return nil
+            case .generic: return nil
             }
         }
 
@@ -152,6 +176,7 @@ class TransferImplS: Transfer {
             switch self {
             case .bitcoin: return false
             case .ethereum (_, let tid): return tid == eth
+            case .generic: return false
             }
         }
 
@@ -159,6 +184,7 @@ class TransferImplS: Transfer {
             switch self {
             case .bitcoin (_, let tid): return tid == btc
             case .ethereum: return false
+            case .generic: return false
             }
         }
 
@@ -174,6 +200,8 @@ class TransferImplS: Transfer {
                     // But if we didn't send it, then the inputs will be the sender's inputs.
                     .first { inputsContain == BRWalletContainsAddress (wid, UnsafeRawPointer([$0.address]).assumingMemoryBound(to: CChar.self)) }
                     .map { Address.createAsBTC (BRAddress (s: $0.address))}
+            case let .generic (source, _, _, _):
+                return source
             }
         }
 
@@ -190,6 +218,8 @@ class TransferImplS: Transfer {
                     // outputs.  But if we did send it, then the outpus witll be the targets outputs.
                     .first { outputsContain == BRWalletContainsAddress(wid, UnsafeRawPointer([$0.address]).assumingMemoryBound(to: CChar.self)) }
                     .map { Address.createAsBTC (BRAddress (s: $0.address)) }
+            case let .generic (_, target, _, _):
+                return target
             }
         }
 
@@ -217,8 +247,10 @@ class TransferImplS: Transfer {
                     : (send - Int64(fees)) - recv)
 
                 return Amount.createAsBTC (UInt64(value), unit)
-            }
 
+            case let .generic (_, _, amount, _):
+                return Amount (core: amount.core, unit: unit)
+            }
         }
 
         internal func fee (in unit: Unit) -> Amount {
@@ -233,6 +265,8 @@ class TransferImplS: Transfer {
                 //        var transaction = core
                 let fee = BRWalletFeeForTx (wid, tid)
                 return Amount.createAsBTC (fee, unit)
+            case let .generic (_, _, _, fee):
+                return Amount (core: fee.core, unit: unit)
             }
         }
 
@@ -246,6 +280,9 @@ class TransferImplS: Transfer {
                 // composed of UTXOs from wallet)
                 let fee = BRWalletFeeForTx (wid, tid)
                 return fee != UINT64_MAX // && fee != 0
+
+            case .generic:
+                return true
             }
         }
     }

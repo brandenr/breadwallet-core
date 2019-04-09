@@ -806,6 +806,7 @@ extension Transfer {
 public enum TransferFeeBasis {
     case bitcoin  (feePerKB: UInt64) // in satoshi
     case ethereum (gasPrice: Amount, gasLimit: UInt64)
+    // case generic (...)
 }
 
 ///

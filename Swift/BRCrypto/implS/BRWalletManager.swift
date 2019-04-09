@@ -8,6 +8,7 @@
 //  See the LICENSE file at the project root for license information.
 //  See the CONTRIBUTORS file at the project root for a list of contributors.
 //
+import Foundation // Dispatch {Queue, Timer}
 
 import BRCryptoC
 import BRCore
@@ -160,7 +161,12 @@ class WalletManagerImplS: WalletManager {
             self.impl = Impl.ethereum (ewm: ewm)
 
         default:
-            self.impl = Impl.generic
+            let queue = DispatchQueue(label: "GenericWAlletManager:\(network.currency.core)")
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+
+            self.impl = Impl.generic (queue: queue,
+                                      timer: timer,
+                                      periodInMilliseconds: 10 * 1000)
         }
 
         listener.handleManagerEvent (system: system,
@@ -169,7 +175,7 @@ class WalletManagerImplS: WalletManager {
     }
 
     public func connect() {
-        impl.connect ()
+        impl.connect (query: query)
     }
 
     public func disconnect() {
@@ -188,6 +194,19 @@ class WalletManagerImplS: WalletManager {
     public func sync() {
         impl.sync()
     }
+
+    deinit {
+        switch impl {
+        case let .generic (_, timer, _):
+            // genericDisconnect
+            timer.suspend()
+            timer.cancel()
+
+        default:
+            break
+        }
+    }
+
 
     // Actually a Set/Dictionary by {Symbol}
     //    public private(set) var all: [EthereumToken] = []
@@ -643,7 +662,7 @@ class WalletManagerImplS: WalletManager {
     enum Impl {
         case bitcoin (mid: BRCoreWalletManager)
         case ethereum (ewm: BREthereumEWM)
-        case generic
+        case generic (queue: DispatchQueue, timer: DispatchSourceTimer, periodInMilliseconds: Int) /* (sync, sign, submit) */
 
         internal var ewm: BREthereumEWM! {
             switch self {
@@ -661,14 +680,14 @@ class WalletManagerImplS: WalletManager {
             }
         }
 
-        internal func connect() {
+        internal func connect (query: BlockChainDB) {
             switch self {
             case let .ethereum (ewm):
                 ewmConnect (ewm)
             case let .bitcoin (mid):
                 BRWalletManagerConnect (mid)
             case .generic:
-                break
+                genericConnect (query)
             }
         }
         internal func disconnect() {
@@ -678,7 +697,7 @@ class WalletManagerImplS: WalletManager {
             case let .bitcoin (mid):
                 BRWalletManagerDisconnect (mid)
             case .generic:
-                break
+                genericDisconnect()
             }
         }
 
@@ -689,7 +708,7 @@ class WalletManagerImplS: WalletManager {
             case let .bitcoin (mid):
                 BRWalletManagerScan (mid)
             case .generic:
-                break
+                genericSync()
             }
         }
         
@@ -711,7 +730,6 @@ class WalletManagerImplS: WalletManager {
             case .generic:
                 break
             }
-
         }
 
         internal func submit (manager: WalletManagerImplS, wallet: WalletImplS, transfer: TransferImplS) {
@@ -749,7 +767,31 @@ class WalletManagerImplS: WalletManager {
             case .generic:
                 break
             }
+        }
 
+        private func genericConnect (_ query: BlockChainDB) {
+            guard case let .generic (_, timer, period) = self else { precondition (false); return }
+
+            // Arguably we should set up a BlockchainDB subscription; but, for now poll.
+            timer.schedule (deadline: .now(), repeating: DispatchTimeInterval.milliseconds(period))
+            timer.setEventHandler {
+                NSLog ("Want to Ping BRD - generic wallet manager")
+//                query.getTransfers (blockchainID: network.uids,
+//                                    addresses: /* ... */ []) {
+//
+//                }
+            }
+            timer.resume()
+
+
+        }
+
+        private func genericDisconnect () {
+            guard case let .generic (_, timer, _) = self else { precondition (false); return }
+            timer.suspend()
+        }
+
+        private func genericSync () {
         }
     }
 }

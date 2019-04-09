@@ -135,6 +135,8 @@ class WalletImplS: Wallet {
             return BitcoinLegacyAddressScheme().getAddress(for: self)
         case .ethereum:
             return Address.createAsETH (accountGetPrimaryAddress (manager.account.asETH))
+        case let .generic (_, _, _, target):
+            return target
         }
     }
 
@@ -144,6 +146,8 @@ class WalletImplS: Wallet {
             return BitcoinLegacyAddressScheme().getAddress(for: self)
         case .ethereum:
             return Address.createAsETH (accountGetPrimaryAddress (manager.account.asETH))
+        case let .generic (_, _, source, _):
+            return source
         }
     }
 
@@ -190,15 +194,40 @@ class WalletImplS: Wallet {
                                           event: WalletEvent.created)
     }
 
+        internal init (listener: WalletListener?,
+                       manager: WalletManagerImplS,
+                       unit: Unit,
+                       gen: (balance:Amount, defaultFeeBasis:TransferFeeBasis, source:Address, target:Address)) {
+            self.listener = listener
+            self.manager = manager
+            self.name = unit.currency.code
+            self.unit = unit
+            self.impl = Impl.generic(balance: gen.balance,
+                                     defaultFeeBasis: gen.defaultFeeBasis,
+                                     source: gen.source,
+                                     target: gen.target)
+
+            self.state = WalletState.created
+            self.defaultFeeBasis = gen.defaultFeeBasis
+
+            self.listener?.handleWalletEvent (system: system,
+                                              manager: manager,
+                                              wallet: self,
+                                              event: WalletEvent.created)
+
+    }
+
 
     enum Impl {
         case bitcoin (wid: BRCoreWallet)
         case ethereum (ewm: BREthereumEWM, core: BREthereumWallet)
+        case generic (balance: Amount, defaultFeeBasis: TransferFeeBasis, source: Address, target: Address)
 
         internal var ewm: BREthereumEWM! {
             switch self {
             case .bitcoin: return nil
             case .ethereum (let ewm, _): return ewm
+            case .generic: return nil
             }
         }
 
@@ -206,6 +235,7 @@ class WalletImplS: Wallet {
             switch self {
             case .bitcoin: return nil
             case .ethereum (_, let eth): return eth
+            case .generic: return nil
             }
         }
 
@@ -213,6 +243,7 @@ class WalletImplS: Wallet {
             switch self {
             case .bitcoin (let btc): return btc
             case .ethereum: return nil
+            case .generic: return nil
             }
         }
 
@@ -220,6 +251,7 @@ class WalletImplS: Wallet {
             switch self {
             case .bitcoin: return false
             case .ethereum (_, let core): return core == eth
+            case .generic: return false
             }
         }
 
@@ -227,6 +259,7 @@ class WalletImplS: Wallet {
             switch self {
             case .bitcoin (let wid): return wid == btc
             case .ethereum: return false
+            case .generic: return false
             }
         }
 
@@ -240,6 +273,8 @@ class WalletImplS: Wallet {
                 return Amount.createAsETH (value, unit)
             case let .bitcoin (wid):
                 return Amount.createAsBTC (BRWalletBalance (wid), unit)
+            case let .generic (balance, _, _, _):
+                return Amount (core: balance.core, unit: unit)
             }
         }
 
@@ -253,6 +288,8 @@ class WalletImplS: Wallet {
                     gasLimit: coreGasLimit.amountOfGas)
             case let .bitcoin (wid):
                 return TransferFeeBasis.bitcoin(feePerKB: BRWalletFeePerKb (wid))
+            case let .generic (_, defaultFeeBasis, _, _):
+                return defaultFeeBasis
             }
         }
     }
